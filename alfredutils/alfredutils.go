@@ -34,7 +34,7 @@ func AddClearAuthMagic(wf *aw.Workflow, keychainAccount string) {
     }))
 }
 
-func InitWorkflow(wf *aw.Workflow, cfg interface{}) error {
+func InitWorkflow(wf *aw.Workflow, cfg any) error {
     wf.Args()
     if err := wf.Config.To(cfg); err != nil {
         return err
@@ -73,7 +73,7 @@ func HandleFeedback(wf *aw.Workflow) {
     wf.SendFeedback()
 }
 
-func LoadCache(wf *aw.Workflow, name string, out interface{}) error {
+func LoadCache(wf *aw.Workflow, name string, out any) error {
     if wf.Cache.Exists(name) {
         if err := wf.Cache.LoadJSON(name, out); err != nil {
             return err
@@ -95,7 +95,7 @@ func RefreshCache(wf *aw.Workflow, name string, maxAge time.Duration, cmdArgs []
             log.Printf("%s job already running.", cacheJobName)
         }
 
-        var cache []interface{}
+        var cache []any
         err := LoadCache(wf, name, &cache)
         if err != nil {
             return err
@@ -110,7 +110,7 @@ func RefreshCache(wf *aw.Workflow, name string, maxAge time.Duration, cmdArgs []
     return nil
 }
 
-func HandleAuthentication(wf *aw.Workflow, keychainAccount string) {
+func HandleAuthentication(wf *aw.Workflow, keychainAccount string) (ok bool) {
     _, err := wf.Keychain.Get(keychainAccount)
     if err != nil {
         wf.NewItem("You're not logged in.").
@@ -119,5 +119,7 @@ func HandleAuthentication(wf *aw.Workflow, keychainAccount string) {
             Arg("auth").
             Valid(true)
         HandleFeedback(wf)
+		return false
     }
+	return true
 }
