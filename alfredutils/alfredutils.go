@@ -92,8 +92,9 @@ func LoadCache(wf *aw.Workflow, name string, out any) error {
 
 // RefreshCache starts a background job to refresh the named cache if it has
 // expired. Adds a "Refreshing cache…" item if the cache file does not yet
-// exist. The caller is responsible for calling HandleFeedback afterward.
-func RefreshCache(wf *aw.Workflow, name string, maxAge time.Duration, cmdArgs []string) error {
+// exist. An optional icon overrides the default IconInfo on that item. The
+// caller is responsible for calling HandleFeedback afterward.
+func RefreshCache(wf *aw.Workflow, name string, maxAge time.Duration, cmdArgs []string, icon ...*aw.Icon) error {
 	if !wf.Cache.Expired(name, maxAge) {
 		return nil
 	}
@@ -114,7 +115,11 @@ func RefreshCache(wf *aw.Workflow, name string, maxAge time.Duration, cmdArgs []
 	wf.Rerun(2)
 
 	if !wf.Cache.Exists(name) {
-		wf.NewItem("Refreshing cache…").Icon(aw.IconInfo)
+		cacheIcon := aw.IconInfo
+		if len(icon) > 0 && icon[0] != nil {
+			cacheIcon = icon[0]
+		}
+		wf.NewItem("Refreshing cache…").Icon(cacheIcon)
 	}
 
 	return nil
