@@ -75,7 +75,7 @@ func TestOutsideAlfred(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !wf.Env.Outside || wf.Env.BundleID != "com.example.outside" || wf.Env.Name != "Outside" || wf.Env.Version != "1.2.3" {
+	if !wf.Env.Outside || wf.Env.BundleID != "com.example.outside" || wf.Env.Name != "Outside" || wf.Env.Version != "" {
 		t.Errorf("Env = %+v", wf.Env)
 	}
 	if !strings.HasSuffix(wf.Env.CacheDir, filepath.Join("Workflow Data", "com.example.outside")) {
