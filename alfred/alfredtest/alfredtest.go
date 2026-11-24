@@ -39,12 +39,14 @@ func New(t testing.TB, env map[string]string, opts ...alfred.Option) (*alfred.Wo
 
 // Feedback is decoded Script Filter output.
 type Feedback struct {
-	Items     []Item            `json:"items"`
-	Rerun     float64           `json:"rerun"`
-	Variables map[string]string `json:"variables"`
+	Items         []Item            `json:"items"`
+	Rerun         float64           `json:"rerun"`
+	Variables     map[string]string `json:"variables"`
+	SkipKnowledge bool              `json:"skipknowledge"`
 }
 
 type Item struct {
+	UID          string              `json:"uid"`
 	Title        string              `json:"title"`
 	Subtitle     string              `json:"subtitle"`
 	Arg          any                 `json:"arg"`

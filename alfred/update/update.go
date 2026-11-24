@@ -21,8 +21,11 @@ import (
 
 const (
 	stateKey = "_update/latest.json"
-	jobName  = "update"
-	interval = 24 * time.Hour
+	// enabledVar is the workflow variable that turns update checks off when
+	// "0" or "false", typically a User Configuration checkbox.
+	enabledVar = "check_for_updates"
+	jobName    = "update"
+	interval   = 24 * time.Hour
 )
 
 // Updater checks one GitHub repo for releases.
@@ -56,11 +59,24 @@ func GitHub(wf *alfred.Workflow, repo string) *Updater {
 	return u
 }
 
-// Run starts "<binary> update" in the background once a day, and adds an
-// "Update available!" item when the last check found a newer version. It
-// does nothing without alfred_workflow_version, as in Alfred UI scripts.
+// Enabled reports whether update checks are on: they are unless the
+// check_for_updates variable is false. The "workflow:update" query works
+// either way.
+func (u *Updater) Enabled() bool {
+	v, ok := u.wf.Lookup(enabledVar)
+	if !ok || v == "" {
+		return true
+	}
+	on, err := strconv.ParseBool(v)
+	return err != nil || on
+}
+
+// Run starts "<binary> update" in the background once a day, and adds a
+// pinned "Update available!" item when the last check found a newer version.
+// It does nothing without alfred_workflow_version, as in Alfred UI scripts,
+// or when check_for_updates is false.
 func (u *Updater) Run() error {
-	if u.wf.Env.Version == "" {
+	if u.wf.Env.Version == "" || !u.Enabled() {
 		return nil
 	}
 	if u.wf.Cache.Expired(stateKey, interval) {
@@ -70,6 +86,7 @@ func (u *Updater) Run() error {
 	}
 	if u.Available() {
 		u.wf.NewItem("Update available!").
+			Pin().
 			Subtitle("Press ⏎ to install").
 			Autocomplete("workflow:update").
 			Icon(alfred.IconInfo)

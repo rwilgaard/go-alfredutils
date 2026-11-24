@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"go.deanishe.net/fuzzy"
 )
 
 // Response is the output of a Script Filter.
@@ -17,7 +15,7 @@ type Response struct {
 	vars          map[string]string
 	cache         *cacheConfig
 	skipKnowledge bool
-	fuzzyOpts     []fuzzy.Option
+	filter        filterConfig
 }
 
 type cacheConfig struct {
@@ -66,54 +64,34 @@ func (r *Response) Cache(d time.Duration, looseReload bool) *Response {
 	return r
 }
 
-// SkipKnowledge stops Alfred learning from the selected item. Requires Alfred 5.
+// SkipKnowledge stops Alfred learning from the selected item and keeps the
+// items in the order given, apart from knowledge Alfred already has for their
+// UIDs. WithUsage sets it on every response. Requires Alfred 5.
 func (r *Response) SkipKnowledge() *Response {
 	r.skipKnowledge = true
 	return r
 }
 
-// Filter keeps the items that fuzzy-match query, best match first. It matches
-// an item's Match text, or its title when Match isn't set. An empty query
-// leaves the items as they are.
-func (r *Response) Filter(query string) {
-	if query == "" {
-		return
-	}
-	results := fuzzy.New(itemList(r.items), r.fuzzyOpts...).Sort(query)
-	kept := r.items[:0]
-	for i, res := range results {
-		if res.Match {
-			kept = append(kept, r.items[i])
-		}
-	}
-	clear(r.items[len(kept):])
-	r.items = kept
-}
-
-type itemList []*Item
-
-func (l itemList) Len() int           { return len(l) }
-func (l itemList) Less(int, int) bool { return false } // equal scores keep no particular order, as in awgo
-func (l itemList) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
-func (l itemList) Keywords(i int) string {
-	if l[i].match != nil {
-		return *l[i].match
-	}
-	return l[i].title
-}
-
 func (r *Response) MarshalJSON() ([]byte, error) {
-	items := r.items
-	if items == nil {
-		items = []*Item{}
+	var prefix string
+	if r.filter.usage != nil {
+		prefix = uidPrefix
+	}
+	items := make([]json.RawMessage, len(r.items))
+	for i, it := range r.items {
+		b, err := it.marshal(prefix)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = b
 	}
 	return json.Marshal(struct {
-		Items         []*Item           `json:"items"`
+		Items         []json.RawMessage `json:"items"`
 		Rerun         float64           `json:"rerun,omitempty"`
 		Variables     map[string]string `json:"variables,omitempty"`
 		Cache         *cacheConfig      `json:"cache,omitempty"`
 		SkipKnowledge bool              `json:"skipknowledge,omitempty"`
-	}{items, r.rerun.Seconds(), r.vars, r.cache, r.skipKnowledge})
+	}{items, r.rerun.Seconds(), r.vars, r.cache, r.skipKnowledge || r.filter.usage != nil})
 }
 
 // Icon is an item or modifier icon.
@@ -153,6 +131,9 @@ type Item struct {
 	valid        bool
 	autocomplete string
 	match        *string
+	matchFields  []matchField
+	exact        []string
+	pinned       bool
 	typ          string
 	icon         *Icon
 	copytext     string
@@ -171,7 +152,8 @@ func (it *Item) Subtitle(s string) *Item { it.subtitle = s; return it }
 // Arg is what the next object receives. More than one value is sent as an array.
 func (it *Item) Arg(args ...string) *Item { it.arg, it.argSet = args, true; return it }
 
-// UID lets Alfred learn which items get picked and rank them first.
+// UID lets Alfred learn which items get picked and rank them first. With
+// WithUsage, it is also the id usage is recorded and ranked by.
 func (it *Item) UID(uid string) *Item { it.uid = uid; return it }
 
 // Valid makes the item actionable with ⏎.
@@ -183,6 +165,22 @@ func (it *Item) Autocomplete(s string) *Item { it.autocomplete = s; return it }
 
 // Match is the text Filter and Alfred's own filtering match on, instead of the title.
 func (it *Item) Match(s string) *Item { it.match = &s; return it }
+
+// MatchOn adds a field Filter matches the query against, weighted by w.
+// The title (or Match text) stays the primary field unless a MatchPrimary
+// field is added.
+func (it *Item) MatchOn(w MatchWeight, text string) *Item {
+	it.matchFields = append(it.matchFields, matchField{text, w})
+	return it
+}
+
+// MatchExact adds a value, like an ID, that Filter matches only when a query
+// word equals it, ignoring case.
+func (it *Item) MatchExact(text string) *Item { it.exact = append(it.exact, text); return it }
+
+// Pin keeps the item above all others: Filter never drops or reorders it.
+// Pinned items keep the order they were added in.
+func (it *Item) Pin() *Item { it.pinned = true; return it }
 
 func (it *Item) Icon(icon Icon) *Item { it.icon = &icon; return it }
 
@@ -231,7 +229,13 @@ func (it *Item) NewModifier(keys ...Mod) *Modifier {
 	return m
 }
 
-func (it *Item) MarshalJSON() ([]byte, error) {
+func (it *Item) MarshalJSON() ([]byte, error) { return it.marshal("") }
+
+func (it *Item) marshal(uidPrefix string) ([]byte, error) {
+	uid := it.uid
+	if uid != "" {
+		uid = uidPrefix + uid
+	}
 	var text map[string]string
 	if it.copytext != "" || it.largetype != "" {
 		text = map[string]string{}
@@ -258,7 +262,7 @@ func (it *Item) MarshalJSON() ([]byte, error) {
 		Mods         map[string]*Modifier `json:"mods,omitempty"`
 		Action       *ItemAction          `json:"action,omitempty"`
 	}{
-		UID:          it.uid,
+		UID:          uid,
 		Title:        it.title,
 		Subtitle:     it.subtitle,
 		Arg:          argValue(it.arg, it.argSet),

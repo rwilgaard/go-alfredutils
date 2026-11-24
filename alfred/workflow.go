@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 
 	"go.deanishe.net/fuzzy"
 )
@@ -52,6 +53,10 @@ type Workflow struct {
 	magic      map[string]magic
 	noResults  [2]string
 	sent       bool
+	withUsage  bool
+
+	// Usage records item uses for ranking. It is nil without WithUsage.
+	Usage *Usage
 }
 
 type magic struct {
@@ -87,7 +92,7 @@ func WithMaxResults(n int) Option { return func(wf *Workflow) { wf.maxResults = 
 
 // WithFuzzy sets the options Filter scores items with.
 func WithFuzzy(opts ...fuzzy.Option) Option {
-	return func(wf *Workflow) { wf.fuzzyOpts = opts }
+	return func(wf *Workflow) { wf.filter.fuzzyOpts = opts }
 }
 
 // New reads Alfred's environment. It creates no directories: the stores make
@@ -114,6 +119,10 @@ func New(opts ...Option) (*Workflow, error) {
 	wf.Cache = &Store{dir: env.CacheDir}
 	wf.Data = &Store{dir: env.DataDir}
 	wf.Keychain = &Keychain{service: env.BundleID}
+	if wf.withUsage {
+		wf.Usage = &Usage{store: wf.Data, now: time.Now}
+		wf.filter.usage = wf.Usage
+	}
 	return wf, nil
 }
 
@@ -224,9 +233,12 @@ func (wf *Workflow) Send() {
 	}
 	wf.sent = true
 
-	if wf.IsEmpty() {
-		wf.NewItem(wf.noResults[0]).Subtitle(wf.noResults[1]).Icon(IconInfo)
+	pinned, rest := partitionPinned(wf.items)
+	if len(rest) == 0 {
+		icon := IconInfo
+		rest = append(rest, &Item{title: wf.noResults[0], subtitle: wf.noResults[1], icon: &icon})
 	}
+	wf.items = append(pinned, rest...)
 	if wf.maxResults > 0 && len(wf.items) > wf.maxResults {
 		wf.items = wf.items[:wf.maxResults]
 	}
@@ -239,9 +251,9 @@ func (wf *Workflow) Send() {
 func (wf *Workflow) FatalError(err error) {
 	log.Printf("error: %v", err)
 	if !wf.sent {
-		opts := wf.fuzzyOpts
+		cfg := wf.filter
 		wf.Response = NewResponse()
-		wf.fuzzyOpts = opts
+		wf.filter = cfg
 		wf.NewItem(err.Error()).Largetype(err.Error()).Icon(IconError)
 		wf.Send()
 	}
