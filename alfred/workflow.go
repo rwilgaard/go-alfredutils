@@ -34,6 +34,9 @@ type Env struct {
 	Preferences   string
 	Debug         bool // the workflow debugger is open
 	AlfredVersion string
+	// Outside is true when Alfred didn't run the binary and New read the
+	// rest from the workflow's info.plist. See WithWorkflowDir.
+	Outside bool
 }
 
 // Workflow is one run of the workflow binary.
@@ -45,15 +48,17 @@ type Workflow struct {
 	Data     *Store
 	Keychain *Keychain
 
-	lookup     func(string) (string, bool)
-	stdout     io.Writer
-	args       []string
-	exit       func(int)
-	maxResults int
-	magic      map[string]magic
-	noResults  [2]string
-	sent       bool
-	withUsage  bool
+	lookup      func(string) (string, bool)
+	envGiven    bool
+	workflowDir string
+	stdout      io.Writer
+	args        []string
+	exit        func(int)
+	maxResults  int
+	magic       map[string]magic
+	noResults   [2]string
+	sent        bool
+	withUsage   bool
 
 	// Usage records item uses for ranking. It is nil without WithUsage.
 	Usage *Usage
@@ -75,6 +80,7 @@ func WithEnv(env map[string]string) Option {
 			v, ok := env[k]
 			return v, ok
 		}
+		wf.envGiven = true
 	}
 }
 
@@ -97,6 +103,10 @@ func WithFuzzy(opts ...fuzzy.Option) Option {
 
 // New reads Alfred's environment. It creates no directories: the stores make
 // theirs on the first write.
+//
+// Run outside Alfred, such as from a terminal, New reads what Alfred would
+// set from the workflow's info.plist instead (see WithWorkflowDir), and
+// returns ErrNotAlfred only if it finds none.
 func New(opts ...Option) (*Workflow, error) {
 	wf := &Workflow{
 		Response:  NewResponse(),
@@ -111,10 +121,21 @@ func New(opts ...Option) (*Workflow, error) {
 		opt(wf)
 	}
 
+	outside := false
+	if _, ok := wf.lookup("alfred_workflow_bundleid"); !ok && (wf.workflowDir != "" || !wf.envGiven) {
+		lookup, err := wf.outsideLookup(wf.lookup)
+		if err != nil {
+			return nil, err
+		}
+		if lookup != nil {
+			wf.lookup, outside = lookup, true
+		}
+	}
 	env, err := readEnv(wf.lookup)
 	if err != nil {
 		return nil, err
 	}
+	env.Outside = outside
 	wf.Env = env
 	wf.Cache = &Store{dir: env.CacheDir}
 	wf.Data = &Store{dir: env.DataDir}
