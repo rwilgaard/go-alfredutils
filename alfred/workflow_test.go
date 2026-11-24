@@ -3,6 +3,7 @@ package alfred_test
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"slices"
 	"testing"
@@ -47,6 +48,11 @@ func TestItemJSON(t *testing.T) {
 				r.Rerun(time.Millisecond).Cache(time.Second, true).SkipKnowledge()
 			},
 			want: `{"items":[],"rerun":0.1,"cache":{"seconds":5,"loosereload":true},"skipknowledge":true}`,
+		},
+		{
+			name:  "Title replaces the title",
+			build: func(r *alfred.Response) { r.NewItem("a").Title("b") },
+			want:  `{"items":[{"title":"b","valid":false}]}`,
 		},
 		{
 			name: "file items default their arg to the path",
@@ -238,5 +244,34 @@ func TestJobs(t *testing.T) {
 	}
 	if wf.IsRunning("sleep") {
 		t.Error("killed job is still running")
+	}
+}
+
+func TestJobLog(t *testing.T) {
+	wf, _ := alfredtest.New(t, nil)
+	run := func(script string) string {
+		t.Helper()
+		if err := wf.RunInBackground("log", exec.Command("/bin/sh", "-c", script)); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for wf.IsRunning("log") {
+			if time.Now().After(deadline) {
+				t.Fatal("job didn't finish")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		b, err := os.ReadFile(wf.JobLog("log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+
+	if got := run("echo out; echo err >&2"); got != "out\nerr\n" {
+		t.Errorf("log = %q, want stdout and stderr", got)
+	}
+	if got := run("echo second"); got != "second\n" {
+		t.Errorf("log = %q, want only the latest run", got)
 	}
 }

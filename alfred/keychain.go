@@ -16,6 +16,9 @@ var ErrNotFound = errors.New("keychain item not found")
 // ID, the same entries awgo writes.
 type Keychain struct{ service string }
 
+// securityBin is a variable so tests can point it at a fake.
+var securityBin = "/usr/bin/security"
+
 // security(1) exit codes.
 const (
 	secNotFound  = 44
@@ -32,10 +35,26 @@ func (k *Keychain) Get(account string) (string, error) {
 	return parsePassword(out)
 }
 
-// Set stores secret for account, replacing an existing entry.
+// Set stores secret for account, replacing an existing entry. The command
+// goes to security's interactive mode on stdin, so the secret never shows up
+// in the process list.
 func (k *Keychain) Set(account, secret string) error {
-	_, err := k.run("add-generic-password", account, "-U", "-w", secret)
+	for _, s := range []string{k.service, account, secret} {
+		if strings.ContainsAny(s, "\r\n") {
+			return errors.New("keychain: service, account and secret can't contain line breaks")
+		}
+	}
+	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s\n", quoteArg(k.service), quoteArg(account), quoteArg(secret))
+	cmd := exec.Command(securityBin, "-i")
+	cmd.Stdin = strings.NewReader(line)
+	_, err := runSecurity(cmd, "add-generic-password", account)
 	return err
+}
+
+// quoteArg quotes s for a line of `security -i`, which reads double-quoted
+// arguments with backslash escapes.
+func quoteArg(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 func (k *Keychain) Delete(account string) error {
@@ -45,7 +64,12 @@ func (k *Keychain) Delete(account string) error {
 
 func (k *Keychain) run(command, account string, args ...string) (string, error) {
 	args = append([]string{command, "-s", k.service, "-a", account}, args...)
-	cmd := exec.Command("/usr/bin/security", args...)
+	return runSecurity(exec.Command(securityBin, args...), command, account)
+}
+
+// runSecurity runs cmd and returns its stderr, where security writes what -g
+// finds. In -i mode the exit status is the last command's.
+func runSecurity(cmd *exec.Cmd, command, account string) (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
