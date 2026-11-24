@@ -73,3 +73,31 @@ func TestCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestEnabled(t *testing.T) {
+	tests := []struct {
+		value string
+		set   bool
+		want  bool
+	}{
+		{set: false, want: true},
+		{value: "", set: true, want: true},
+		{value: "1", set: true, want: true},
+		{value: "true", set: true, want: true},
+		{value: "0", set: true, want: false},
+		{value: "false", set: true, want: false},
+		{value: "junk", set: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			env := map[string]string{"alfred_workflow_version": "1.0.0"}
+			if tt.set {
+				env[enabledVar] = tt.value
+			}
+			wf, _ := alfredtest.New(t, env)
+			if got := GitHub(wf, "o/r").Enabled(); got != tt.want {
+				t.Errorf("Enabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
