@@ -16,6 +16,14 @@ import (
 // set them, as it does for a run from a terminal. The env vars New would
 // otherwise read still take precedence.
 //
+// The version is not read, so Env.Version stays empty and alfred/update
+// doesn't check for updates from a terminal; set alfred_workflow_version to
+// test that.
+//
+// The cache, data folders and Keychain entries are the real ones for the
+// bundle ID, as in Alfred. Set alfred_workflow_cache and alfred_workflow_data
+// to use others.
+//
 // Without this option, and without WithEnv, New looks for info.plist next to
 // the executable, then in the current directory, then in ./workflow.
 func WithWorkflowDir(dir string) Option {
@@ -68,7 +76,7 @@ func (wf *Workflow) outsideLookup(base func(string) (string, bool)) (func(string
 }
 
 // outsideVars returns the env vars Alfred would give the workflow in dir:
-// its bundle ID, name and version, and its variables, with User
+// its bundle ID and name, and its variables, with User
 // Configuration values from prefs.plist over their defaults.
 func outsideVars(dir string) (map[string]string, error) {
 	info, _, err := plist.Read(filepath.Join(dir, "info.plist"))
@@ -107,9 +115,6 @@ func outsideVars(dir string) (map[string]string, error) {
 	vars["alfred_workflow_bundleid"] = bundleID
 	if name, ok := info["name"].(string); ok {
 		vars["alfred_workflow_name"] = name
-	}
-	if version, ok := info["version"].(string); ok {
-		vars["alfred_workflow_version"] = version
 	}
 	return vars, nil
 }
