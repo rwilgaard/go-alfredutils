@@ -25,6 +25,21 @@ type Update struct {
 	Relayout bool             `json:"relayout,omitempty"`
 }
 
+// Replace swaps whole components for new ones. Alfred lays out the whole UI
+// again afterwards.
+type Replace struct {
+	IDs map[string]Props `json:"ids"`
+	// RetainIDs false stops a replacement without its own id from taking
+	// the outgoing component's. Alfred's default is true.
+	RetainIDs *bool `json:"retainids,omitempty"`
+}
+
+// Insert appends components to the end of a parent view's components.
+// Alfred lays out the whole UI again afterwards.
+type Insert struct {
+	IDs map[string][]Props `json:"ids"`
+}
+
 // Finish closes the UI and passes args and variables to the next workflow object.
 type Finish struct {
 	Args      any               `json:"args,omitempty"`
@@ -47,7 +62,9 @@ type Pulse struct {
 // Actions is the top-level JSON object.
 type Actions struct {
 	Variables map[string]string `json:"variables,omitempty"`
+	Insert    *Insert           `json:"insert,omitempty"`
 	Update    *Update           `json:"update,omitempty"`
+	Replace   *Replace          `json:"replace,omitempty"`
 	Sheet     *Sheet            `json:"sheet,omitempty"`
 	Pulse     *Pulse            `json:"pulse,omitempty"`
 	Finish    *Finish           `json:"finish,omitempty"`
@@ -74,6 +91,25 @@ func (a Actions) Set(id string, p Props) Actions {
 		return a
 	}
 	a.Update.IDs[id] = p
+	return a
+}
+
+// ReplaceWith replaces the component id with component, which needs its own
+// "type". It keeps id unless component sets another.
+func (a Actions) ReplaceWith(id string, component Props) Actions {
+	if a.Replace == nil {
+		a.Replace = &Replace{IDs: map[string]Props{}}
+	}
+	a.Replace.IDs[id] = component
+	return a
+}
+
+// Append adds components to the end of the view parentID.
+func (a Actions) Append(parentID string, components ...Props) Actions {
+	if a.Insert == nil {
+		a.Insert = &Insert{IDs: map[string][]Props{}}
+	}
+	a.Insert.IDs[parentID] = append(a.Insert.IDs[parentID], components...)
 	return a
 }
 

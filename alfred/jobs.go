@@ -19,10 +19,20 @@ var ErrJobExists = errors.New("job already running")
 const jobsDir = "_aw/jobs"
 
 // RunInBackground starts cmd in its own process group, so it outlives the
-// Script Filter that started it.
+// Script Filter that started it. Unless cmd already has an output, its stdout
+// and stderr go to JobLog(name), replacing the previous run's log.
 func (wf *Workflow) RunInBackground(name string, cmd *exec.Cmd) error {
 	if pid, ok := wf.jobPid(name); ok {
 		return fmt.Errorf("%w: %s (pid %d)", ErrJobExists, name, pid)
+	}
+	if cmd.Stdout == nil && cmd.Stderr == nil {
+		logFile, err := wf.createJobLog(name)
+		if err != nil {
+			return err
+		}
+		// The child has its own copy of the descriptor once started.
+		defer logFile.Close() //nolint:errcheck // nothing was written through this handle
+		cmd.Stdout, cmd.Stderr = logFile, logFile
 	}
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -34,6 +44,19 @@ func (wf *Workflow) RunInBackground(name string, cmd *exec.Cmd) error {
 	// Reap the child when it exits; nothing waits on it otherwise.
 	go cmd.Wait() //nolint:errcheck // the job's exit status isn't used
 	return wf.Cache.Store(pidKey(name), []byte(strconv.Itoa(cmd.Process.Pid)))
+}
+
+// JobLog returns the path of the log a background job writes to.
+func (wf *Workflow) JobLog(name string) string {
+	return wf.Cache.Path(filepath.Join(jobsDir, name+".log"))
+}
+
+func (wf *Workflow) createJobLog(name string) (*os.File, error) {
+	path := wf.JobLog(name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	return os.Create(path) //nolint:gosec // path is built from the cache folder and a job name the workflow chose
 }
 
 // Start runs this binary with args as job name. It returns false when the

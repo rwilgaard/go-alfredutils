@@ -163,6 +163,9 @@ type Item struct {
 	action       *ItemAction
 }
 
+// Title replaces the title given to NewItem.
+func (it *Item) Title(s string) *Item { it.title = s; return it }
+
 func (it *Item) Subtitle(s string) *Item { it.subtitle = s; return it }
 
 // Arg is what the next object receives. More than one value is sent as an array.
