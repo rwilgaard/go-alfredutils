@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // ErrJobExists is returned when a job of the same name is already running.
@@ -106,3 +107,29 @@ func (wf *Workflow) jobPid(name string) (int, bool) {
 }
 
 func pidKey(name string) string { return filepath.Join(jobsDir, name+".pid") }
+
+// RefreshIfStale keeps a cached key fresh from a Script Filter. When key is
+// missing or older than maxAge, it starts job (this binary with args, or with
+// job as its only argument when args is empty) and reruns the Script Filter
+// every 2 s to pick up the result, and it reports true. While key is missing
+// altogether, the no-results row says "Refreshing cache…", so a NoResults
+// call after this replaces that.
+//
+// Use the same job name everywhere the job is started, so two refreshes never
+// run at once.
+func (wf *Workflow) RefreshIfStale(key string, maxAge time.Duration, job string, args ...string) (bool, error) {
+	if !wf.Cache.Expired(key, maxAge) {
+		return false, nil
+	}
+	if len(args) == 0 {
+		args = []string{job}
+	}
+	if _, err := wf.Start(job, args...); err != nil {
+		return false, err
+	}
+	wf.Rerun(2 * time.Second)
+	if !wf.Cache.Exists(key) {
+		wf.NoResults("Refreshing cache…", "Results appear in a moment")
+	}
+	return true, nil
+}
