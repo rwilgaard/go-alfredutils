@@ -37,6 +37,11 @@ var ErrNotInstalled = errors.New("workflow is not installed in Alfred")
 // since the last Install, usually from editing the workflow in Alfred.
 var ErrModified = errors.New("installed info.plist was changed in Alfred since the last dev install")
 
+// ErrLinked is returned by Install when the installed workflow folder is a
+// symbolic link. Install would write through it, into the folder it points
+// to, which may be the source folder itself.
+var ErrLinked = errors.New("installed workflow is a symbolic link")
+
 // keep lists the entries at the root of an installed workflow that Install
 // never copies over or removes.
 var keep = map[string]bool{"prefs.plist": true}
@@ -107,10 +112,12 @@ func Find(prefsDir, bundleID string) (string, error) {
 	}
 	var found []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		dir := filepath.Join(workflows, e.Name())
+		// A workflow linked into Alfred's preferences is a symlink, which
+		// DirEntry.IsDir doesn't follow.
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 			continue
 		}
-		dir := filepath.Join(workflows, e.Name())
 		p, _, err := readPlist(filepath.Join(dir, "info.plist"))
 		if err != nil {
 			continue
@@ -174,6 +181,9 @@ func Install(src string, opts Options) (*Result, error) {
 	case err != nil:
 		return nil, err
 	default:
+		if err := checkLinked(src, res.Dir); err != nil {
+			return nil, err
+		}
 		if same, err := sameDir(src, res.Dir); err != nil {
 			return nil, err
 		} else if same {
@@ -241,6 +251,11 @@ func Pull(dst string, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if same, err := sameDir(dst, dir); err != nil {
+		return "", err
+	} else if same {
+		return "", fmt.Errorf("%s is the installed workflow itself; there is nothing to pull", dst)
+	}
 	p, raw, err := readPlist(filepath.Join(dir, "info.plist"))
 	if err != nil {
 		return "", err
@@ -297,6 +312,26 @@ func newFolder(prefsDir string) (string, error) {
 	b[8] = b[8]&0x3f | 0x80
 	id := strings.ToUpper(fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]))
 	return filepath.Join(prefsDir, "workflows", "user.workflow."+id), nil
+}
+
+// checkLinked returns ErrLinked when the installed folder dir is a symlink,
+// saying where it points and what to do.
+func checkLinked(src, dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink == 0 {
+		return nil
+	}
+	target, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrLinked, dir, err)
+	}
+	if same, err := sameDir(src, dir); err == nil && same {
+		return fmt.Errorf("%w: %s links to %s, so Alfred already runs it; replace the link with a copy of the folder to use Install", ErrLinked, dir, target)
+	}
+	return fmt.Errorf("%w: %s links to %s; replace the link with a copy of the folder to use Install", ErrLinked, dir, target)
 }
 
 func sameDir(a, b string) (bool, error) {

@@ -254,6 +254,73 @@ func TestFind(t *testing.T) {
 	}
 }
 
+// linked adds an installed workflow that is a symlink to target.
+func (e env) linked(t *testing.T, name, target string) string {
+	t.Helper()
+	dir := filepath.Join(e.prefs, "workflows", name)
+	if err := os.Symlink(target, dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestFindSymlink(t *testing.T) {
+	e := setup(t)
+	dir := e.linked(t, "user.workflow.LINK", e.src)
+	if got, err := Find(e.prefs, bundle); err != nil || got != dir {
+		t.Errorf("Find = %q, %v; want %q", got, err, dir)
+	}
+	// A dangling link or a link to a file isn't a workflow.
+	e.linked(t, "user.workflow.DANGLING", filepath.Join(e.src, "missing"))
+	e.linked(t, "user.workflow.FILE", filepath.Join(e.src, "bin"))
+	if got, err := Find(e.prefs, bundle); err != nil || got != dir {
+		t.Errorf("Find with bad links = %q, %v; want %q", got, err, dir)
+	}
+}
+
+func TestInstallLinked(t *testing.T) {
+	t.Run("to source", func(t *testing.T) {
+		e := setup(t)
+		e.linked(t, "user.workflow.LINK", e.src)
+		before := read(t, filepath.Join(e.src, "bin"))
+		_, err := Install(e.src, e.opts)
+		if !errors.Is(err, ErrLinked) || !strings.Contains(err.Error(), "already runs it") {
+			t.Fatalf("err = %v, want ErrLinked saying Alfred already runs it", err)
+		}
+		if got := read(t, filepath.Join(e.src, "bin")); got != before {
+			t.Errorf("source bin = %q, want %q", got, before)
+		}
+		entries, err := os.ReadDir(filepath.Join(e.prefs, "workflows"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			t.Errorf("%d installed workflows, want 1: Install created a duplicate", len(entries))
+		}
+	})
+	t.Run("elsewhere", func(t *testing.T) {
+		e := setup(t)
+		other := filepath.Join(t.TempDir(), "other")
+		write(t, filepath.Join(other, "info.plist"), infoPlist(bundle, nil), 0o644)
+		write(t, filepath.Join(other, "keepme"), "x", 0o644)
+		e.linked(t, "user.workflow.LINK", other)
+		if _, err := Install(e.src, e.opts); !errors.Is(err, ErrLinked) {
+			t.Fatalf("err = %v, want ErrLinked", err)
+		}
+		if !exists(filepath.Join(other, "keepme")) || exists(filepath.Join(other, "bin")) {
+			t.Error("Install wrote into the linked folder")
+		}
+	})
+}
+
+func TestPullLinkedToSource(t *testing.T) {
+	e := setup(t)
+	e.linked(t, "user.workflow.LINK", e.src)
+	if _, err := Pull(e.src, e.opts); err == nil || !strings.Contains(err.Error(), "nothing to pull") {
+		t.Errorf("err = %v, want nothing to pull", err)
+	}
+}
+
 func TestInstallIntoItself(t *testing.T) {
 	e := setup(t)
 	res, err := Install(e.src, e.opts)
