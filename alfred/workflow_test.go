@@ -193,6 +193,24 @@ func TestRunMagic(t *testing.T) {
 		}
 	})
 
+	t.Run("shows the error when the action fails", func(t *testing.T) {
+		wf, out := alfredtest.New(t, nil, alfred.WithArgs("workflow:reset"))
+		wf.AddMagic("reset", "Reset", "Resetting…", func() error { return errors.New("disk full") })
+		wf.Run(func() { t.Fatal("fn ran") })
+		if got := alfredtest.Decode(t, out).Titles(); !slices.Equal(got, []string{"disk full"}) {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("shows a MagicInfo as the result", func(t *testing.T) {
+		wf, out := alfredtest.New(t, nil, alfred.WithArgs("workflow:reset"))
+		wf.AddMagic("reset", "Reset", "Resetting…", func() error { return alfred.MagicInfo("Nothing to reset") })
+		wf.Run(func() { t.Fatal("fn ran") })
+		if got := alfredtest.Decode(t, out).Titles(); !slices.Equal(got, []string{"Nothing to reset"}) {
+			t.Errorf("got %q", got)
+		}
+	})
+
 	t.Run("lists actions for an unknown keyword", func(t *testing.T) {
 		wf, out := alfredtest.New(t, nil, alfred.WithArgs("workflow:"))
 		wf.AddMagic("reset", "Reset", "Resetting…", func() error { t.Fatal("action ran"); return nil })

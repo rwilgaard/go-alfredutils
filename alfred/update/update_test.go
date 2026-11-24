@@ -1,10 +1,12 @@
 package update
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/rwilgaard/go-alfredutils/v2/alfred"
 	"github.com/rwilgaard/go-alfredutils/v2/alfred/alfredtest"
 )
 
@@ -99,5 +101,47 @@ func TestEnabled(t *testing.T) {
 				t.Errorf("Enabled() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInstallChecksWhenNoUpdateIsKnown(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`[{"tag_name": "v1.2.0", "assets": [{"name": "w.alfredworkflow", "browser_download_url": "https://x/1.2.0"}]}]`)) //nolint:errcheck // test server
+	}))
+	defer srv.Close()
+
+	wf, _ := alfredtest.New(t, map[string]string{"alfred_workflow_version": "1.2.0"})
+	u := GitHub(wf, "o/r")
+	u.apiURL = srv.URL
+
+	err := u.Install(t.Context())
+	var info alfred.MagicInfo
+	if !errors.As(err, &info) {
+		t.Fatalf("err = %v, want a MagicInfo", err)
+	}
+	if want := "You have the latest version (1.2.0)"; info.Error() != want {
+		t.Errorf("info = %q, want %q", info, want)
+	}
+	if requests != 1 {
+		t.Errorf("%d requests, want 1 check", requests)
+	}
+}
+
+func TestInstallReportsCheckFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	wf, _ := alfredtest.New(t, map[string]string{"alfred_workflow_version": "1.2.0"})
+	u := GitHub(wf, "o/r")
+	u.apiURL = srv.URL
+
+	err := u.Install(t.Context())
+	var info alfred.MagicInfo
+	if err == nil || errors.As(err, &info) {
+		t.Fatalf("err = %v, want a check failure", err)
 	}
 }

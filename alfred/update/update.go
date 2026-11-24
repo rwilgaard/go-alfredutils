@@ -5,7 +5,6 @@ package update
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,7 +51,7 @@ func GitHub(wf *alfred.Workflow, repo string) *Updater {
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
 	if wf.Env.Version != "" {
-		wf.AddMagic("update", "Install the latest version", "Downloading update…", func() error {
+		wf.AddMagic("update", "Install the latest version", "Installing update…", func() error {
 			return u.Install(context.Background())
 		})
 	}
@@ -170,11 +169,18 @@ func (u *Updater) latest() (release, bool) {
 }
 
 // Install downloads the newer .alfredworkflow and opens it, which asks Alfred
-// to import it.
+// to import it. Unless the last check already found one, it checks GitHub
+// first, so "workflow:update" works without waiting for the daily check. It
+// returns an alfred.MagicInfo when this is the latest version.
 func (u *Updater) Install(ctx context.Context) error {
 	r, ok := u.latest()
 	if !ok {
-		return errors.New("no update available")
+		if err := u.Check(ctx); err != nil {
+			return fmt.Errorf("check for updates: %w", err)
+		}
+		if r, ok = u.latest(); !ok {
+			return alfred.MagicInfo(fmt.Sprintf("You have the latest version (%s)", u.wf.Env.Version))
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, nil)
 	if err != nil {

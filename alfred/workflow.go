@@ -200,8 +200,10 @@ func (wf *Workflow) Run(fn func()) {
 }
 
 // AddMagic registers an action that runs when the Script Filter query is
-// "workflow:<keyword>". runText is shown while it runs. A query of just
-// "workflow:" lists the registered actions.
+// "workflow:<keyword>". runText is shown once fn succeeds; an error from fn
+// is shown instead (as an info row when it is a MagicInfo). Alfred keeps
+// showing its previous results while fn runs. A query of just "workflow:"
+// lists the registered actions.
 func (wf *Workflow) AddMagic(keyword, description, runText string, fn func() error) {
 	wf.magic[keyword] = magic{description: description, runText: runText, fn: fn}
 }
@@ -213,11 +215,23 @@ func (wf *Workflow) runMagic() bool {
 			continue
 		}
 		if m, ok := wf.magic[query]; ok {
-			wf.NewItem(m.runText).Icon(IconInfo)
-			wf.Send()
-			if err := m.fn(); err != nil {
+			// Run first, then answer: Alfred shows a Script Filter's first
+			// output until the next run, so a row sent before fn would stay
+			// whatever fn did.
+			err := m.fn()
+			var info MagicInfo
+			switch {
+			case err == nil:
+				wf.NewItem(m.runText).Icon(IconInfo)
+			case errors.As(err, &info):
+				wf.NewItem(info.Error()).Icon(IconInfo)
+			default:
 				log.Printf("magic action %q: %v", query, err)
+				wf.NewItem(err.Error()).
+					Subtitle("workflow:" + query + " failed").
+					Icon(IconError)
 			}
+			wf.Send()
 			return true
 		}
 
@@ -240,6 +254,13 @@ func (wf *Workflow) runMagic() bool {
 	}
 	return false
 }
+
+// MagicInfo is an error a magic action returns when it had nothing to do,
+// such as "workflow:update" without a newer release. Its text is shown as an
+// info row rather than as a failure.
+type MagicInfo string
+
+func (m MagicInfo) Error() string { return string(m) }
 
 // NoResults sets the row Send adds when there are no items.
 func (wf *Workflow) NoResults(title, subtitle string) {
