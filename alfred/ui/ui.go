@@ -59,6 +59,21 @@ type Pulse struct {
 	Interval float64 `json:"interval"`
 }
 
+// Auto sizes a window dimension to its content (see Resize).
+const Auto = "auto"
+
+// Window acts on the UI's window.
+type Window struct {
+	Resize *Resize `json:"resize,omitempty"`
+}
+
+// Resize sets the window's content size, toolbar not included. Width and
+// Height are each a size in points (int), Auto, or nil to keep the current one.
+type Resize struct {
+	Width  any `json:"width,omitempty"`
+	Height any `json:"height,omitempty"`
+}
+
 // Actions is the top-level JSON object.
 type Actions struct {
 	Variables map[string]string `json:"variables,omitempty"`
@@ -67,6 +82,7 @@ type Actions struct {
 	Replace   *Replace          `json:"replace,omitempty"`
 	Sheet     *Sheet            `json:"sheet,omitempty"`
 	Pulse     *Pulse            `json:"pulse,omitempty"`
+	Window    *Window           `json:"window,omitempty"`
 	Finish    *Finish           `json:"finish,omitempty"`
 }
 
@@ -138,6 +154,13 @@ func (a Actions) SetVar(k, v string) Actions {
 // WithSheet adds a sheet action.
 func (a Actions) WithSheet(sh *Sheet) Actions {
 	a.Sheet = sh
+	return a
+}
+
+// ResizeWindow sets the window's content size. width and height are each an
+// int, Auto, or nil to keep the current value.
+func (a Actions) ResizeWindow(width, height any) Actions {
+	a.Window = &Window{Resize: &Resize{Width: width, Height: height}}
 	return a
 }
 
